@@ -1,0 +1,278 @@
+{
+  "name": "Closers AI - Multi Agent (Hunter → Analyzer → Closer)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "4397ca04-f8c2-4904-a0a7-dfff0a8dca25",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [120, 200],
+      "id": "webhook_trigger",
+      "name": "Webhook (App → n8n)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "job_id", "value": "={{ $json.body?.job_id || $json.job_id }}", "type": "string" },
+            { "name": "input", "value": "={{ $json.body?.input || $json.input }}", "type": "object" },
+            { "name": "callback_url", "value": "={{ $json.body?.callback_url || $json.callback_url }}", "type": "string" },
+            { "name": "callback_secret", "value": "={{ $json.body?.callback_secret || $json.callback_secret }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [360, 200],
+      "id": "normalize_input",
+      "name": "Normalize Input"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "validation",
+              "leftValue": "={{ $json.job_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [580, 200],
+      "id": "validate_input",
+      "name": "Validate Input"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are the HUNTER agent for Closers AI. Your job is to propose a list of candidate lead profiles based on the provided ICP (Ideal Customer Profile).\n\nYou MUST output valid JSON with this exact structure:\n{\n  \"candidates\": [\n    {\n      \"name\": \"Full Name\",\n      \"platform\": \"linkedin\" or \"instagram\",\n      \"profile_url\": \"https://...\",\n      \"why_match\": \"Brief explanation of why this person matches the ICP\",\n      \"signals\": [\"signal1\", \"signal2\"],\n      \"confidence\": 0-100\n    }\n  ],\n  \"search_summary\": \"Brief summary of search performed\"\n}\n\nIf you cannot find real profiles, create realistic simulated examples based on the ICP criteria. Mark simulated profiles clearly in the why_match field."
+            },
+            {
+              "role": "user",
+              "content": "Find candidate leads matching this ICP:\n\n{{ JSON.stringify($json.input, null, 2) }}\n\nReturn JSON with 3-5 matching candidates."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "response_format": { "type": "json_object" }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.9,
+      "position": [840, 140],
+      "id": "hunter_agent",
+      "name": "HUNTER Agent (LLM)",
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst hunterResponse = input.message?.content || input.content || JSON.stringify(input);\n\nlet candidates = [];\ntry {\n  const parsed = JSON.parse(hunterResponse);\n  candidates = parsed.candidates || [];\n} catch (e) {\n  // If JSON parsing fails, return empty array\n  candidates = [];\n}\n\nreturn [{\n  json: {\n    ...$('Normalize Input').first().json,\n    hunterResult: { candidates },\n    stage: 'analyzer'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 140],
+      "id": "parse_hunter",
+      "name": "Parse Hunter Response"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are the ANALYZER agent for Closers AI. You receive candidate leads and must score, qualify, and decide which to contact.\n\nYou MUST output valid JSON with this exact structure:\n{\n  \"qualified_leads\": [\n    {\n      \"name\": \"Full Name\",\n      \"platform\": \"linkedin\" or \"instagram\",\n      \"profile_url\": \"https://...\",\n      \"analysis\": \"Detailed analysis of why this lead is valuable\",\n      \"score\": 0-100,\n      \"lead_status\": \"qualified\" or \"discarded\",\n      \"qualification_reasons\": [\"reason1\", \"reason2\"]\n    }\n  ],\n  \"analysis_summary\": \"Brief summary of analysis\"\n}\n\nBe strict: only leads with score >= 70 should be marked as 'qualified'. Lower scores should be 'discarded'."
+            },
+            {
+              "role": "user",
+              "content": "Analyze and score these candidates against the ICP:\n\nICP: {{ JSON.stringify($json.input, null, 2) }}\n\nCandidates: {{ JSON.stringify($json.hunterResult.candidates, null, 2) }}\n\nReturn JSON with scored and qualified leads."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "response_format": { "type": "json_object" }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.9,
+      "position": [1320, 140],
+      "id": "analyzer_agent",
+      "name": "ANALYZER Agent (LLM)",
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst analyzerResponse = input.message?.content || input.content || JSON.stringify(input);\n\nlet qualifiedLeads = [];\ntry {\n  const parsed = JSON.parse(analyzerResponse);\n  qualifiedLeads = (parsed.qualified_leads || []).filter(l => l.lead_status === 'qualified');\n} catch (e) {\n  qualifiedLeads = [];\n}\n\nreturn [{\n  json: {\n    ...$('Parse Hunter Response').first().json,\n    analyzerResult: { qualified_leads: qualifiedLeads },\n    stage: 'closer'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 140],
+      "id": "parse_analyzer",
+      "name": "Parse Analyzer Response"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are the CLOSER agent for Closers AI. You craft personalized, compliant first messages for each qualified lead.\n\nYou MUST output valid JSON with this exact structure:\n{\n  \"leads\": [\n    {\n      \"name\": \"Full Name\",\n      \"platform\": \"linkedin\" or \"instagram\",\n      \"profile_url\": \"https://...\",\n      \"analysis\": \"Brief analysis\",\n      \"score\": 0-100,\n      \"message_sent\": \"The personalized message to send\",\n      \"lead_status\": \"contacted\",\n      \"next_step\": \"What to do if they respond\"\n    }\n  ],\n  \"summary\": {\n    \"leads_found\": number,\n    \"leads_contacted\": number,\n    \"leads_interested\": 0,\n    \"meetings_requested\": 0\n  }\n}\n\nMessages should be:\n- Personalized to the lead\n- Non-spammy and professional\n- Aligned with the contact strategy tone and CTA type"
+            },
+            {
+              "role": "user",
+              "content": "Create personalized outreach messages for these qualified leads:\n\nContact Strategy: {{ JSON.stringify($json.input.contact_strategy, null, 2) }}\n\nBusiness Context: {{ JSON.stringify($json.input.business_context, null, 2) }}\n\nQualified Leads: {{ JSON.stringify($json.analyzerResult.qualified_leads, null, 2) }}\n\nReturn JSON with leads and messages."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5,
+          "response_format": { "type": "json_object" }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.9,
+      "position": [1800, 140],
+      "id": "closer_agent",
+      "name": "CLOSER Agent (LLM)",
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst closerResponse = input.message?.content || input.content || JSON.stringify(input);\nconst baseData = $('Parse Analyzer Response').first().json;\n\nlet output = { leads: [], summary: { leads_found: 0, leads_contacted: 0, leads_interested: 0, meetings_requested: 0 } };\n\ntry {\n  const parsed = JSON.parse(closerResponse);\n  output = {\n    leads: parsed.leads || [],\n    summary: parsed.summary || {\n      leads_found: (parsed.leads || []).length,\n      leads_contacted: (parsed.leads || []).filter(l => l.lead_status === 'contacted').length,\n      leads_interested: 0,\n      meetings_requested: 0\n    }\n  };\n} catch (e) {\n  // Keep default empty output\n}\n\nreturn [{\n  json: {\n    job_id: baseData.job_id,\n    status: 'completed',\n    output: output,\n    error: null,\n    callback_url: baseData.callback_url,\n    callback_secret: baseData.callback_secret\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2040, 140],
+      "id": "normalize_output",
+      "name": "Normalize Output"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.callback_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-callback-secret",
+              "value": "={{ $json.callback_secret }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": \"{{ $json.job_id }}\",\n  \"status\": \"{{ $json.status }}\",\n  \"output\": {{ JSON.stringify($json.output) }},\n  \"error\": null\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2280, 140],
+      "id": "callback_request",
+      "name": "Callback (n8n → App)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json;\nreturn [{\n  json: {\n    success: true,\n    job_id: $('Normalize Output').first().json.job_id,\n    status: 'completed',\n    leads_count: $('Normalize Output').first().json.output?.summary?.leads_contacted || 0\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2520, 140],
+      "id": "response_formatter",
+      "name": "Format Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    success: false,\n    error: 'Missing job_id in request',\n    message: 'Please provide a valid job_id in the request body'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [580, 360],
+      "id": "error_response",
+      "name": "Error Response"
+    }
+  ],
+  "connections": {
+    "Webhook (App → n8n)": {
+      "main": [[{ "node": "Normalize Input", "type": "main", "index": 0 }]]
+    },
+    "Normalize Input": {
+      "main": [[{ "node": "Validate Input", "type": "main", "index": 0 }]]
+    },
+    "Validate Input": {
+      "main": [
+        [{ "node": "HUNTER Agent (LLM)", "type": "main", "index": 0 }],
+        [{ "node": "Error Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "HUNTER Agent (LLM)": {
+      "main": [[{ "node": "Parse Hunter Response", "type": "main", "index": 0 }]]
+    },
+    "Parse Hunter Response": {
+      "main": [[{ "node": "ANALYZER Agent (LLM)", "type": "main", "index": 0 }]]
+    },
+    "ANALYZER Agent (LLM)": {
+      "main": [[{ "node": "Parse Analyzer Response", "type": "main", "index": 0 }]]
+    },
+    "Parse Analyzer Response": {
+      "main": [[{ "node": "CLOSER Agent (LLM)", "type": "main", "index": 0 }]]
+    },
+    "CLOSER Agent (LLM)": {
+      "main": [[{ "node": "Normalize Output", "type": "main", "index": 0 }]]
+    },
+    "Normalize Output": {
+      "main": [[{ "node": "Callback (n8n → App)", "type": "main", "index": 0 }]]
+    },
+    "Callback (n8n → App)": {
+      "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "closers-ai-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "closers-ai"
+  },
+  "pinData": {},
+  "tags": []
+}

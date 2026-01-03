@@ -2,7 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { CreateJobRequest, CreateJobResponse, Job, JobStatus } from '@/lib/types';
 
-// POST /api/jobs - Create a new job and trigger n8n
+// Extended response type that includes webhook info for client-side triggering
+interface CreateJobWithWebhookResponse extends CreateJobResponse {
+    webhook?: {
+        url: string;
+        payload: {
+            job_id: string;
+            input: unknown;
+            callback_url: string;
+            callback_secret: string | undefined;
+        };
+    };
+}
+
+// POST /api/jobs - Create a new job and return webhook info for client to trigger n8n
+// NOTE: We don't call n8n from server because Cloudflare blocks Vercel IPs
 export async function POST(request: NextRequest) {
     try {
         const supabase = await createClient();
@@ -51,44 +65,38 @@ export async function POST(request: NextRequest) {
 
         const typedJob = job as Job;
 
-        // Trigger n8n webhook
+        // Prepare n8n webhook data for client-side triggering
         const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+        const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/n8n`;
+        const callbackSecret = process.env.N8N_CALLBACK_SECRET;
+
         if (n8nWebhookUrl) {
-            try {
-                const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/n8n`;
-                const callbackSecret = process.env.N8N_CALLBACK_SECRET;
+            // Update job status to running
+            await supabase
+                .from('jobs')
+                .update({ status: 'running' })
+                .eq('id', typedJob.id);
 
-                // Update job status to running
-                await supabase
-                    .from('jobs')
-                    .update({ status: 'running' })
-                    .eq('id', typedJob.id);
+            const updatedJob: Job = { ...typedJob, status: 'running' };
 
-                // Fire and forget - don't wait for n8n to complete
-                fetch(n8nWebhookUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
+            // Return job with webhook info for client to trigger
+            const response: CreateJobWithWebhookResponse = {
+                job: updatedJob,
+                webhook: {
+                    url: n8nWebhookUrl,
+                    payload: {
                         job_id: typedJob.id,
                         input: body.input,
                         callback_url: callbackUrl,
                         callback_secret: callbackSecret,
-                    }),
-                }).catch((err) => {
-                    console.error('Failed to trigger n8n webhook:', err);
-                });
+                    },
+                },
+            };
 
-                // Return job with updated status
-                const updatedJob: Job = { ...typedJob, status: 'running' };
-                const response: CreateJobResponse = { job: updatedJob };
-                return NextResponse.json(response, { status: 201 });
-            } catch (webhookError) {
-                console.error('Error triggering n8n:', webhookError);
-            }
+            return NextResponse.json(response, { status: 201 });
         }
 
+        // Fallback if webhook URL not configured
         const response: CreateJobResponse = { job: typedJob };
         return NextResponse.json(response, { status: 201 });
     } catch (error) {

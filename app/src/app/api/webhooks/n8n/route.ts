@@ -4,13 +4,30 @@ import type { N8nWebhookPayload, Lead } from '@/lib/types';
 
 // POST /api/webhooks/n8n - Callback from n8n workflow
 export async function POST(request: NextRequest) {
+    console.log('🔔 [WEBHOOK] n8n callback received');
+    console.log('🔔 [WEBHOOK] Method:', request.method);
+    console.log('🔔 [WEBHOOK] URL:', request.url);
+
     try {
+        // Log all headers for debugging
+        const headers: Record<string, string> = {};
+        request.headers.forEach((value, key) => {
+            headers[key] = key.toLowerCase().includes('secret') ? '***HIDDEN***' : value;
+        });
+        console.log('🔔 [WEBHOOK] Headers:', JSON.stringify(headers));
+
         // Verify callback secret
         const callbackSecret = request.headers.get('x-callback-secret');
         const expectedSecret = process.env.N8N_CALLBACK_SECRET;
 
+        console.log('🔔 [WEBHOOK] Secret received:', callbackSecret ? 'Yes' : 'No');
+        console.log('🔔 [WEBHOOK] Expected secret configured:', expectedSecret ? 'Yes' : 'No');
+        console.log('🔔 [WEBHOOK] Secrets match:', callbackSecret === expectedSecret);
+
         if (!expectedSecret || callbackSecret !== expectedSecret) {
-            console.error('Invalid callback secret');
+            console.error('❌ [WEBHOOK] Invalid callback secret');
+            console.error('❌ [WEBHOOK] Received:', callbackSecret?.substring(0, 10) + '...');
+            console.error('❌ [WEBHOOK] Expected:', expectedSecret?.substring(0, 10) + '...');
             return NextResponse.json(
                 { error: 'Unauthorized' },
                 { status: 401 }

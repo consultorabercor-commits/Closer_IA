@@ -240,6 +240,31 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
             }
 
             const data = await response.json();
+
+            // If webhook info is provided, trigger n8n from the browser
+            // This is done client-side because Cloudflare blocks Vercel server IPs
+            if (data.webhook?.url && data.webhook?.payload) {
+                console.log('🚀 Triggering n8n workflow from browser...');
+                try {
+                    const webhookResponse = await fetch(data.webhook.url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(data.webhook.payload),
+                    });
+
+                    if (webhookResponse.ok) {
+                        console.log('✅ n8n workflow triggered successfully');
+                    } else {
+                        console.error('⚠️ n8n webhook returned non-ok status:', webhookResponse.status);
+                    }
+                } catch (webhookError) {
+                    // Log but don't fail - the job was created, n8n just wasn't triggered
+                    console.error('⚠️ Failed to trigger n8n webhook:', webhookError);
+                }
+            }
+
             onCreated();
             router.push(`/dashboard/${data.job.id}`);
         } catch (err) {
@@ -306,8 +331,8 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                             key={type}
                                             onClick={() => updateField('b2b_or_b2c', type)}
                                             className={`flex-1 py-3 rounded-lg border transition-all ${formData.b2b_or_b2c === type
-                                                    ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                                                    : 'border-[var(--card-border)] hover:border-[var(--muted)]'
+                                                ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                                                : 'border-[var(--card-border)] hover:border-[var(--muted)]'
                                                 }`}
                                         >
                                             {type}
@@ -386,8 +411,8 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                                 updateField('platforms', platforms.length > 0 ? platforms : [platform]);
                                             }}
                                             className={`flex-1 py-3 rounded-lg border transition-all capitalize ${formData.platforms.includes(platform)
-                                                    ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                                                    : 'border-[var(--card-border)] hover:border-[var(--muted)]'
+                                                ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                                                : 'border-[var(--card-border)] hover:border-[var(--muted)]'
                                                 }`}
                                         >
                                             {platform}
@@ -430,8 +455,8 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                             key={tone}
                                             onClick={() => updateField('tone', tone)}
                                             className={`flex-1 py-3 rounded-lg border transition-all capitalize ${formData.tone === tone
-                                                    ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                                                    : 'border-[var(--card-border)] hover:border-[var(--muted)]'
+                                                ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                                                : 'border-[var(--card-border)] hover:border-[var(--muted)]'
                                                 }`}
                                         >
                                             {tone}
@@ -447,8 +472,8 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                             key={goal}
                                             onClick={() => updateField('goal', goal)}
                                             className={`flex-1 py-3 rounded-lg border transition-all capitalize ${formData.goal === goal
-                                                    ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                                                    : 'border-[var(--card-border)] hover:border-[var(--muted)]'
+                                                ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                                                : 'border-[var(--card-border)] hover:border-[var(--muted)]'
                                                 }`}
                                         >
                                             {goal === 'conversation' ? 'Start Conversation' : 'Request Meeting'}
@@ -464,8 +489,8 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                             key={cta}
                                             onClick={() => updateField('cta_type', cta)}
                                             className={`flex-1 py-3 rounded-lg border transition-all ${formData.cta_type === cta
-                                                    ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                                                    : 'border-[var(--card-border)] hover:border-[var(--muted)]'
+                                                ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                                                : 'border-[var(--card-border)] hover:border-[var(--muted)]'
                                                 }`}
                                         >
                                             {cta === 'soft' ? 'Soft CTA' : 'Direct CTA'}
